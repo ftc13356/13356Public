@@ -1,31 +1,27 @@
 package org.firstinspires.ftc.teamcode.Components.CV;
 
-import static java.lang.Math.PI;
-import static java.lang.Math.sin;
-
-import com.acmerobotics.dashboard.config.Config;
-
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
-import org.opencv.core.MatOfPoint2f;
-import org.opencv.core.RotatedRect;
 import org.opencv.core.Scalar;
 import org.opencv.imgproc.Imgproc;
 import org.openftc.easyopencv.OpenCvPipeline;
 
 import java.util.ArrayList;
 import java.util.List;
-@Config
+
+//for dashboard
+/*@Config*/
 public class StickObserverPipeline extends OpenCvPipeline {
-    double centerOfPole = 0, poleSize = 0, degPerPix = -22.5/320, widTimesDist = 16.007*58;
+
+    //backlog of frames to average out to reduce noise
     ArrayList<double[]> frameList;
+    //these are public static to be tuned in dashboard
     public static double strictLowS = 140;
     public static double strictHighS = 255;
 
-
     public StickObserverPipeline() {
-        frameList=new ArrayList<>();
+        frameList = new ArrayList<>();
     }
 
     @Override
@@ -38,6 +34,7 @@ public class StickObserverPipeline extends OpenCvPipeline {
             return input;
         }
 
+        // lenient bounds will filter out near yellow, this should filter out all near yellow things(tune this if needed)
         Scalar lowHSV = new Scalar(20, 70, 80); // lenient lower bound HSV for yellow
         Scalar highHSV = new Scalar(32, 255, 255); // lenient higher bound HSV for yellow
 
@@ -51,75 +48,41 @@ public class StickObserverPipeline extends OpenCvPipeline {
         //output into masked
         Core.bitwise_and(mat, mat, masked, thresh);
         //calculate average HSV values of the white thresh values
-        Scalar average = Core.mean(masked,thresh);
+        Scalar average = Core.mean(masked, thresh);
 
         Mat scaledMask = new Mat();
         //scale the average saturation to 150
-        masked.convertTo(scaledMask,-1,150/average.val[1],0);
+        masked.convertTo(scaledMask, -1, 150 / average.val[1], 0);
 
 
         Mat scaledThresh = new Mat();
+        //you probably want to tune this
         Scalar strictLowHSV = new Scalar(0, strictLowS, 0); //strict lower bound HSV for yellow
         Scalar strictHighHSV = new Scalar(255, strictHighS, 255); //strict higher bound HSV for yellow
         //apply strict HSV filter onto scaledMask to get rid of any yellow other than pole
-        Core.inRange(scaledMask, strictLowHSV,strictHighHSV,scaledThresh);
+        Core.inRange(scaledMask, strictLowHSV, strictHighHSV, scaledThresh);
 
         Mat finalMask = new Mat();
-        //color in scaledThresh with HSV(for showing result)
+        //color in scaledThresh with HSV, output into finalMask(only useful for showing result)(you can delete)
         Core.bitwise_and(mat, mat, finalMask, scaledThresh);
 
         Mat edges = new Mat();
-        //detect edges of finalMask
+        //detect edges(only useful for showing result)(you can delete)
         Imgproc.Canny(scaledThresh, edges, 100, 200);
 
-
+        //contours, apply post processing to information
         List<MatOfPoint> contours = new ArrayList<>();
         Mat hierarchy = new Mat();
-        //find contours of edges
+        //find contours, input scaledThresh because it has hard edges
         Imgproc.findContours(scaledThresh, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE);
-        MatOfPoint2f[] contoursPoly = new MatOfPoint2f[contours.size()];
-        //rotatedRect because it allows for more accurate bounding rectangles, perfect if pole is slanted
-        RotatedRect[] rectangle = new RotatedRect[contours.size()];
-        //iterate through each contour
-        for (int i = 0; i < contours.size(); i++) {
-            contoursPoly[i] = new MatOfPoint2f();
-            //convert contour to approximate polygon
-            Imgproc.approxPolyDP(new MatOfPoint2f(contours.get(i).toArray()), contoursPoly[i], 10, true);
-            //find rotatedRect for polygon
-            rectangle[i] = Imgproc.minAreaRect(contoursPoly[i]);
-        }
 
-        //find index of largest rotatedRect(assumed that it is closest tile)
-        int maxAreaIndex = 0;
-        double maxWidth = 0;
-        //iterate through each rotatedRect find largest
-        for (int i = 1; i < rectangle.length; i++) {
-            if(rectangle[i].size.height<rectangle[i].size.width){
-                if (rectangle[i].size.height > maxWidth) {
-                    maxAreaIndex = i;
-                    maxWidth = rectangle[i].size.height;
-                }
-            }
-            else{
-                if (rectangle[i].size.width > maxWidth) {
-                    maxAreaIndex = i;
-                    maxWidth = rectangle[i].size.width;
-                }
-            }
-        }
-        //if there is a detected largest contour, record information about it
-        if(rectangle.length>0) {
-            centerOfPole = rectangle[maxAreaIndex].center.y + sin(rectangle[maxAreaIndex].angle) * rectangle[maxAreaIndex].size.width / 2 - 320;
-            poleSize = rectangle[maxAreaIndex].size.height;
-            frameList.add(new double[]{centerOfPole, poleSize});
-        }
-        //list of frames to reduce inconsistency, not too many so that it is still real-time
-        if(frameList.size()>5) {
+        //list of frames to reduce inconsistency, not too many so that it is still real-time, change the number from 5 if you want
+        if (frameList.size() > 5) {
             frameList.remove(0);
         }
 
-        //release all the data
 
+        //release all the data
         input.release();
         scaledThresh.copyTo(input);
         scaledThresh.release();
@@ -128,38 +91,14 @@ public class StickObserverPipeline extends OpenCvPipeline {
         masked.release();
         edges.release();
         thresh.release();
-        hierarchy.release();
         finalMask.release();
-        Scalar lineColor= new Scalar(255,50,50);
-        if(contoursPoly.length>0) {
-            Imgproc.rectangle(input, Imgproc.boundingRect(contoursPoly[maxAreaIndex]), lineColor, 5);
-        }
+        //change the return to whatever mat you want
+        //for example, if I want to look at the lenient thresh:
+        // return thresh;
+        // note that you must not do thresh.release() if you want to return thresh
+        // you also need to release the input if you return thresh(release as much as possible)
         return input;
     }
 
-   public double centerOfPole() {
-        //256.227,257.307,252.9,253.414: 4,11.75|| 18.8 .073
-        //2.5,12.75: 162.7,161.6, 161.7,162.5||  11.09 .068
-        //2,9.5 : 187.45, 187.26|| 11.88  .0648
-         //1,8,7.8 : 273 || 12.99 .047
-        //10.6,22.2 :
-        //4.1,20.6 :
-        double average=0;
-        for(int i=0;i<frameList.size();i++){
-            average+=frameList.get(i)[0];
-        }
-        return average/frameList.size();
-    }
 
-    public double poleSize() {
-        double average=0;
-        for(int i=0;i<frameList.size();i++){
-            average+=frameList.get(i)[1];
-        }
-        return average/frameList.size();
-    }
-
-    public double[] poleRotatedPolarCoord() {
-        return new double[]{degPerPix * centerOfPole() * PI / 180, widTimesDist / poleSize()};
-    }
 }
